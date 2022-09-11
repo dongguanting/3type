@@ -92,8 +92,6 @@ def train_meta(args):
         dataset=args.dataset,
     )
 
-    pdb.set_trace()
-
     if args.debug:
         test_corpus = valid_corpus
         train_corpus = valid_corpus
