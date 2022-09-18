@@ -119,14 +119,15 @@ class EntityTypes(object):
                 )
         return data
 
-    def get_types_embedding(self, labels: torch.Tensor):
-        return self.types_embedding(labels)
-
-    def get_types_mask_embedding(self, labels: torch.Tensor): #返回mask其余实体的embedding
-        return self.types_mask_embedding(labels)
-
-    def get_types_context_embedding(self, labels: torch.Tensor): #返回context的embedding
-        return self.types_context_embedding(labels)
+    def get_types_embedding(self, labels: torch.Tensor, type):
+        if type == 'origin':
+            return self.types_embedding(labels)
+        elif type == 'mask':
+            return self.types_mask_embedding(labels)
+        elif type == 'context':
+            return self.types_context_embedding(labels)
+        else:
+            raise NotImplementedError
 
     def update_type_embedding(self, e_out, e_type_ids, e_type_mask, type): 
         labels = e_type_ids[:, :, 0][e_type_mask[:, :, 0] == 1] #直接找到实体的黄金标签,[18, 56, 56, 34, 61,  5,  5]

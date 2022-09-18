@@ -7,6 +7,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn import CrossEntropyLoss
+from preprocessor import EntityTypes
 
 from transformers import BertForTokenClassification
 from contrastive import instance_CL_Loss, proto_CL_Loss
@@ -95,7 +96,7 @@ class BertForTokenClassification_(BertForTokenClassification):
         e_mask=None,
         e_type_ids=None,
         e_type_mask=None,
-        entity_types=None,
+        entity_types: EntityTypes = None,
         entity_mode: str = "mean",
         is_update_type_embedding: bool = False,
         lambda_max_loss: float = 0.0,
@@ -156,9 +157,7 @@ class BertForTokenClassification_(BertForTokenClassification):
             #原本的原型：保存type_embedding变量中，可以再entity_types类中设置是否更新这个embedding
             # TODO 下面两行，检查是否合理
             e_out = e_out.unsqueeze(2).expand(B, M, K, -1) 
-            types = self.get_types_embedding(  
-                e_type_ids, entity_types
-            )  # batch_size x max_entity_num x K x hidden_size   embedding位置
+            types = entity_types.get_types_embedding(e_type_ids, type='origin')
             if self.distance_mode == "cat":
                 e_types = torch.cat([e_out, types, (e_out - types).abs()], -1)
                 e_types = self.dis_cls(e_types)
@@ -183,7 +182,7 @@ class BertForTokenClassification_(BertForTokenClassification):
             '''原proto的对比学习，正样本为同类别的原型，负样本为非同类别的原型(也可以改为原样本的其余实体，proto_CL_Loss中origin，aug模式分别对应两种负样本模式)'''
             if self.proto_cL_Loss:
                 e_hidden, e_labels=self.set_hidden(e_out[:, :, 0, :], e_type_ids, e_type_mask, entity_types) #因为数据中有可能同一类别出现若干条，我把它们去重，每种类别保留一条，这样符合batch内负样本均为不同类别数据
-                proto_origin = self.set_proto(e_labels,entity_types)
+                proto_origin = self.get_proto(e_labels, entity_types, type='origin')
                 proto_cl_loss = proto_CL_Loss(e_hidden,proto_origin)
                 type_loss = 0.2 * proto_cl_loss + type_loss
 
@@ -203,9 +202,7 @@ class BertForTokenClassification_(BertForTokenClassification):
                     entity_types.update_type_embedding(e_out_masked, e_type_ids_masked, e_type_mask_masked, type='masked') #label的原型type embedding weight更新了
                 #mask其余实体的原型：保存type_mask_embedding变量中，可以再entity_types类中设置是否更新这个embedding
                 e_out_masked = e_out_masked.unsqueeze(2).expand(*e_type_ids_masked.shape, -1) 
-                types_masked = self.get_types_mask_embedding(  
-                    e_type_ids_masked, entity_types
-                )  # batch_size x max_entity_num x K x hidden_size   embedding位置
+                types_masked = entity_types.get_types_embedding(e_type_ids_masked, type='mask')
                 if self.distance_mode == "cat":
                     e_types = torch.cat([e_out_masked, types_masked, (e_out - types_masked).abs()], -1)
                     e_types = self.dis_cls(e_types)
@@ -228,7 +225,7 @@ class BertForTokenClassification_(BertForTokenClassification):
                 
                 if self.proto_cL_Loss: #加入原型对比学习
                     #这里可以尝试一下e_hidden_mask为原样本的效果
-                    proto_origin = self.set_proto_mask(e_labels,entity_types)
+                    proto_origin = self.get_proto(e_labels, entity_types, type='mask')
                     proto_cl_loss = proto_CL_Loss(e_hidden,proto_origin)
                     type_loss = 0.2 * proto_cl_loss + type_loss #mask原型的cl loss                    
 
@@ -252,9 +249,7 @@ class BertForTokenClassification_(BertForTokenClassification):
                 
                 #上下文的原型：保存type_context_embedding变量中，可以再entity_types类中设置是否更新这个embedding
                 e_out_context = e_out_context.unsqueeze(2).expand(B, M, K, -1) 
-                types_context = self.get_types_context_embedding(  
-                    e_type_ids, entity_types
-                )  # batch_size x max_entity_num x K x hidden_size   embedding位置
+                types_context = entity_types.get_types_embedding(e_type_ids, type='context')
                 if self.distance_mode == "cat":
                     e_types = torch.cat([e_out, types, (e_out - types).abs()], -1)
                     e_types = self.dis_cls(e_types)
@@ -277,7 +272,7 @@ class BertForTokenClassification_(BertForTokenClassification):
 
                 if self.proto_cL_Loss: 
                     # e_hidden, e_labels=self.set_hidden(e_out, e_type_ids, e_type_mask, entity_types) #因为数据中有可能同一类别出现若干条，我把它们去重，每种类别保留一条，这样符合batch内负样本均为不同类别数据             
-                    proto_origin = self.set_proto_context(e_labels,entity_types)
+                    proto_origin = self.get_proto(e_labels, entity_types, type='context')
                     proto_cl_loss = proto_CL_Loss(e_hidden,proto_origin)
                     type_loss = 0.2 * proto_cl_loss + type_loss #上下文原型cl loss
 
@@ -402,31 +397,21 @@ class BertForTokenClassification_(BertForTokenClassification):
         #根据label去重复类别，最后返回的hiddens数据，均为不同实体的数据
         return torch.stack(set_hiddens), torch.stack(set_labels)
 
-    #TODO 合并这些函数
-    def set_proto(self, labels, entity_types): #得到对比学习所需要的原型,只取与之前方法对应的
+    def get_proto(self, labels, entity_types, type): #得到对比学习所需要的原型,只取与之前方法对应的
         proto=[]
-        for i in labels:
-            proto.append(entity_types.types_embedding.weight.data[i])
+        if type == 'origin':
+            for i in labels:
+                proto.append(entity_types.types_embedding.weight.data[i])
+        elif type == 'mask':
+            for i in labels:
+                proto.append(entity_types.types_mask_embedding.weight.data[i])
+        elif type == 'context':
+            for i in labels:
+                proto.append(entity_types.types_context_embedding.weight.data[i])
+        else:
+            raise NotImplementedError
         return torch.stack(proto)
-    def set_proto_mask(self, labels, entity_types): #得到对比学习所需要的原型,只取与之前方法对应的
-        proto=[]
-        for i in labels:
-            proto.append(entity_types.types_mask_embedding.weight.data[i])
-        return torch.stack(proto)
-    def set_proto_context(self, labels, entity_types): #得到对比学习所需要的原型,只取与之前方法对应的
-        proto=[]
-        for i in labels:
-            proto.append(entity_types.types_context_embedding.weight.data[i])
-        return torch.stack(proto)
-
-    def get_types_embedding(self, e_type_ids: torch.Tensor, entity_types):
-        return entity_types.get_types_embedding(e_type_ids)  #又调用了preprocessor里的types embedding。这里原型网络将参数更新了
     
-    def get_types_mask_embedding(self, e_type_ids: torch.Tensor, entity_types): #获得类别mask的embedding
-        return entity_types.get_types_mask_embedding(e_type_ids)  
-    
-    def get_types_context_embedding(self, e_type_ids: torch.Tensor, entity_types): #获得context的embedding
-        return entity_types.get_types_context_embedding(e_type_ids)  
 
     def calc_loss(self, loss_fn, preds, target, mask=None):
         target = target.reshape(-1)

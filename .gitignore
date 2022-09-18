@@ -6,3 +6,4 @@ __pycache__/
 /ACL2020data/
 /temp.*
 git_commit_comment.txt
+/debug/

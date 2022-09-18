@@ -43,7 +43,7 @@ for seed in ${SEEDS[@]}; do
             --K=${K} \
             --similar_k=10 \
             --inner_similar_k=10 \
-            --eval_every_meta_steps=100 \
+            --eval_every_meta_steps=1000 \
             --name=10-k_100_type_2_4_3_10_10 \
             --train_mode=type \
             --inner_steps=2 \
@@ -52,13 +52,9 @@ for seed in ${SEEDS[@]}; do
             --concat_types=None \
             --top_top_dir=wzc \
             --lambda_max_loss=2.0 \
-            --debug \
             --mask_proto \
             --proto_cL_Loss
             # --instance_mask_cL_Loss
-            
-
-            # --instance_context_cL_Loss \
             
             # --adv_proto
 
