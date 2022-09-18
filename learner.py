@@ -19,6 +19,7 @@ from transformers import CONFIG_NAME, PYTORCH_PRETRAINED_BERT_CACHE, WEIGHTS_NAM
 from transformers import AdamW as BertAdam
 from transformers import get_linear_schedule_with_warmup
 
+import pdb
 
 logger = logging.getLogger(__file__)
 class FGM():
@@ -35,12 +36,8 @@ class FGM():
                 self.backup[name] = param.data.clone()
                 norm = torch.norm(param.grad)
                 if norm != 0 and not torch.isnan(norm):
-                    # import pdb
-                    # pdb.set_trace()
                     r_at = epsilon * param.grad / norm
                     param.data.add_(r_at)
-        # import pdb
-        # pdb.set_trace()
 
     def restore(self, emb_name='embeddings.LayerNorm.weight'):
         # emb_name这个参数要换成你模型中embedding的参数名
@@ -259,8 +256,6 @@ class Learner(nn.Module):
                     loss_adv = loss_adv + type_loss_adv
                 if no_grad:
                     continue
-                # import pdb
-                # pdb.set_trace()
                 loss_adv.backward()
                 fgm.restore()
             inner_opt.step()
@@ -370,8 +365,6 @@ class Learner(nn.Module):
                 loss = loss + type_loss
             grad = torch.autograd.grad(loss, params)
             meta_grad.append(grad)
-            # import pdb
-            # pdb.set_trace()
             # '''生成上下文loss'''
             # if loss is not None:
             #     span_losses.append(loss.item())
@@ -415,8 +408,6 @@ class Learner(nn.Module):
                 grad = torch.autograd.grad(loss_adv, params)
                 meta_grad.append(grad)
                 fgm.restore()
-                # import pdb
-                # pdb.set_trace()
 
 
             self.load_weights(names, weights)

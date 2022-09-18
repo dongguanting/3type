@@ -27,14 +27,12 @@ def contrastive_loss(plm_encoder, inputs_sentences, positive_examples):
     batch_size = inputs_mean.size()[0]
     cons_loss = 0
     for input, pos_exp in zip(inputs_mean, positive_examples_mean):
-        # pdb.set_trace()
         input = torch.reshape(input, (1, -1))
         pos_exp = torch.reshape(pos_exp, (1, -1))
         sim_pos = cos_similarity(input, pos_exp, 0.1)
         sim_total = cos_similarity(input, inputs_mean, 0.1)
         cur_loss = info_NCE(sim_pos, sim_total)
         cons_loss += cur_loss
-        # pdb.set_trace()
 
     return cons_loss / batch_size
 
@@ -45,14 +43,12 @@ def contrastive_loss(plm_encoder, inputs_sentences, positive_examples):
 #     batch_size = inputs_mean.size()[0]
 #     cons_loss = 0
 #     for ori_input, pos_exp in zip(inputs_mean, positive_examples_mean):
-#         # pdb.set_trace()
 #         ori_input = torch.reshape(ori_input, (1, -1))
 #         pos_exp = torch.reshape(pos_exp, (1, -1))
 #         sim_pos = cos_similarity(ori_input, pos_exp, 0.1)
 #         sim_total = cos_similarity(ori_input, inputs_mean, 0.1)
 #         cur_loss = info_NCE(sim_pos, sim_total)
 #         cons_loss += cur_loss
-#         # pdb.set_trace()
 
 #     return cons_loss / batch_size
 
@@ -62,8 +58,6 @@ def instance_CL_Loss(ori_hidden, aug_hidden, type="origin", temp=0.5):
     batch_size = inputs_mean.size()[0]
     cons_loss = 0
     count = 0
-    # import pdb
-    # pdb.set_trace()
     for ori_input, pos_exp in zip(inputs_mean, positive_examples_mean):
         ori_input = torch.reshape(ori_input, (1, -1))
         pos_exp = torch.reshape(pos_exp, (1, -1))
@@ -76,11 +70,9 @@ def instance_CL_Loss(ori_hidden, aug_hidden, type="origin", temp=0.5):
             negative = positive_examples_mean[torch.arange(positive_examples_mean.size(0)) != count]  # 和其他batch样本的keyword 拉大
         count += 1
 
-        # pdb.set_trace()
         sim_total = cos_similarity(ori_input, negative, temp)  ##修改为了正样例的平均
         cur_loss = info_NCE(sim_pos, sim_total)
         cons_loss += cur_loss
-        # pdb.set_trace()
 
     return cons_loss / batch_size
 def proto_CL_Loss(ori_hidden, aug_hidden, type="origin", temp=0.5):
@@ -89,8 +81,6 @@ def proto_CL_Loss(ori_hidden, aug_hidden, type="origin", temp=0.5):
     batch_size = inputs_mean.size()[0]
     cons_loss = 0
     count = 0
-    # import pdb
-    # pdb.set_trace()
     for ori_input, pos_exp in zip(inputs_mean, positive_examples_mean):
         ori_input = torch.reshape(ori_input, (1, -1))
         pos_exp = torch.reshape(pos_exp, (1, -1))
@@ -103,11 +93,9 @@ def proto_CL_Loss(ori_hidden, aug_hidden, type="origin", temp=0.5):
             negative = positive_examples_mean[torch.arange(positive_examples_mean.size(0)) != count]  # 和其他batch样本的keyword 拉大
         count += 1
 
-        # pdb.set_trace()
         sim_total = cos_similarity(ori_input, negative, temp)  ##修改为了正样例的平均
         cur_loss = info_NCE(sim_pos, sim_total)
         cons_loss += cur_loss
-        # pdb.set_trace()
 
     return cons_loss / batch_size
 

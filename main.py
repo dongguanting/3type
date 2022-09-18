@@ -85,8 +85,8 @@ def train_meta(args):
         args.entity_types,
         do_lower_case=True,
         shuffle=False,
-        viterbi=args.viterbi,
         tagging=args.tagging_scheme,
+        viterbi=args.viterbi,
         device=args.device,
         concat_types=args.concat_types,
         dataset=args.dataset,
@@ -158,8 +158,6 @@ def train_meta(args):
         batch_query, batch_support = train_corpus.get_batch_meta(
             batch_size=args.inner_size
         )  # (batch_size=32)
-        # import pdb
-        # pdb.set_trace()
         if args.use_supervise:
             span_loss, type_loss = learner.forward_supervise(
                 batch_query,
@@ -564,8 +562,10 @@ if __name__ == "__main__":
     parser.add_argument('--adv_2', action='store_true', help="add adv on inner and outer")
     parser.add_argument('--adv_proto', action='store_true', help="only add adv on inner")
     parser.add_argument('--adv_out', action='store_true', help="only add adv on outer")
+
     parser.add_argument('--context_proto', action='store_true', help="添加上下文原型（会直接计算一个原型本身的loss），与proto_cL_Loss联用会继续引入上下文原型对比学习")
     parser.add_argument('--mask_proto', action='store_true', help="添加mask其余实体原型（会直接计算一个原型本身的loss），与proto_cL_Loss联用会继续引入mask原型对比学习")
+
     parser.add_argument('--instance_mask_cL_Loss', action='store_true', help="实例级别的loss，正样本mask其余实体，负样本batch内其他数据")
     parser.add_argument('--instance_context_cL_Loss', action='store_true', help="实例级别的loss，正样本context实体，负样本batch内其他数据")
     parser.add_argument('--proto_cL_Loss', action='store_true', help="默认的原型对比学习的loss，正样本同类原型，负样本是其他原型（联用mask proto与context proto还会添加其余两个原型的cl loss）")
@@ -656,7 +656,7 @@ if __name__ == "__main__":
     args.device = device
     logger.info(f"Using Device {device}")
     args.entity_types = EntityTypes(
-        args.types_path, args.negative_types_number, args.negative_mode
+        args.types_path, args.negative_types_number, args.negative_mode, args.context_proto, args.mask_proto
     )
     args.entity_types.build_types_embedding(
         args.bert_model,

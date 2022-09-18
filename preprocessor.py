@@ -18,7 +18,7 @@ logger = logging.getLogger(__file__)
 
 
 class EntityTypes(object):
-    def __init__(self, types_path: str, negative_types_number: int, negative_mode: str):
+    def __init__(self, types_path: str, negative_types_number: int, negative_mode: str, context_proto:bool, mask_proto:bool):
         self.types = {}
         self.types_map = {}
         self.O_id = 0
@@ -27,6 +27,8 @@ class EntityTypes(object):
         self.types_context_embedding = None # mask句子中其余实体的embedding
         self.negative_mode = negative_mode
         self.load_entity_types(types_path)
+        self.context_proto = context_proto
+        self.mask_proto = mask_proto
 
     def load_entity_types(self, types_path: str):
         self.types = load_file(types_path, "json")
@@ -44,7 +46,7 @@ class EntityTypes(object):
         types_mode: str = "cls",
         init_type_embedding_from_bert: bool = False,
     ):
-        types_list = sorted([jj for ii in self.types.values() for jj in ii])
+        types_list = self.types_list
         if init_type_embedding_from_bert:
             tokenizer = BertTokenizer.from_pretrained(
                 model, do_lower_case=do_lower_case
@@ -70,22 +72,25 @@ class EntityTypes(object):
             outs = model(ids, mask)
         else:
             outs = [0, torch.rand((len(types_list), 768)).to(device)]
+
         self.types_embedding = nn.Embedding(*outs[1].shape).to(device)  #【源代码】原型网络的embedding
-        self.types_mask_embedding= nn.Embedding(*outs[1].shape).to(device)  #【8.19】加入mask的embedding
-        self.types_context_embedding= nn.Embedding(*outs[1].shape).to(device)  #【8.19】加入context的embedding
+        self.types_embedding.requires_grad = True #默认不更新embedding参数
         if types_mode.lower() == "cls":
             self.types_embedding.weight = nn.Parameter(outs[1])  #【源代码】67个标签种类。默认随意初始化一个概率分布
-            self.types_mask_embedding.weight= nn.Parameter(outs[1])  #【8.19】，默认随意初始化一个概率分布
-            self.types_context_embedding.weight= nn.Parameter(outs[1])  #【8.19】，默认随意初始化一个概率分布
 
-        # import pdb
-        # pdb.set_trace()    
-        self.types_embedding.requires_grad = True #默认不更新embedding参数
-        self.types_mask_embedding.requires_grad = True  #默认不更新embedding参数
-        self.types_context_embedding.requires_grad = True  #默认不更新embedding参数
+        if self.mask_proto:
+            self.types_mask_embedding= nn.Embedding(*outs[1].shape).to(device)  #【8.19】加入mask的embedding
+            self.types_mask_embedding.requires_grad = True  #默认不更新embedding参数
+            if types_mode.lower() == "cls":
+                self.types_mask_embedding.weight= nn.Parameter(outs[1])  #【8.19】，默认随意初始化一个概率分布
+
+        if self.context_proto:
+            self.types_context_embedding= nn.Embedding(*outs[1].shape).to(device)  #【8.19】加入context的embedding
+            self.types_context_embedding.requires_grad = False  #默认不更新embedding参数
+            if types_mode.lower() == "cls":
+                self.types_context_embedding.weight = nn.Parameter(outs[1])  #【源代码】67个标签种类。默认随意初始化一个概率分布
+
         logger.info("Built the types embedding.")
-        logger.info("Built the types mask embedding.")
-        logger.info("Built the types context embedding.")
 
     def generate_negative_types(
         self, labels: list, types: list, negative_types_number: int
@@ -123,35 +128,22 @@ class EntityTypes(object):
     def get_types_context_embedding(self, labels: torch.Tensor): #返回context的embedding
         return self.types_context_embedding(labels)
 
-    def update_type_embedding(self, e_out, e_type_ids, e_type_mask): 
-        # import pdb
-        # pdb.set_trace()
+    def update_type_embedding(self, e_out, e_type_ids, e_type_mask, type): 
         labels = e_type_ids[:, :, 0][e_type_mask[:, :, 0] == 1] #直接找到实体的黄金标签,[18, 56, 56, 34, 61,  5,  5]
         hiddens = e_out[e_type_mask[:, :, 0] == 1]  #会把所有的实体展开,batchsize * max entity中，例如是5*2，只保留有意义的，例如只有7个有意义，全0的删除
         label_set = set(labels.detach().cpu().numpy()) #labels去重复{34, 5, 18, 56, 61}
-        for ii in label_set:
-            self.types_embedding.weight.data[ii] = hiddens[labels == ii].mean(0) #label ==ii,会把所有span为ii的句向量，相加平均后放到原型
+        # FIXME 这里只是更新成一个task内的实体表征的均值
+        if type == 'origin':
+            for ii in label_set:
+                self.types_embedding.weight.data[ii] = hiddens[labels == ii].mean(0) #label ==ii,会把所有span为ii的句向量，相加平均后放到原型
       #instance级别对比学习可以从这里改，回来研究原型的表示向量到底是什么
+        elif type == 'masked':
+            for ii in label_set:
+                self.types_mask_embedding.weight.data[ii] = hiddens[labels == ii].mean(0) #label ==ii,会把所有span为ii的句向量，相加平均后放到原型
+        elif type == 'context':
+            for ii in label_set:
+                self.types_context_embedding.weight.data[ii] = hiddens[labels == ii].mean(0) #label ==ii,会把所有span为ii的句向量，相加平均后放到原型
 
-    def update_type_mask_embedding(self, e_out, e_type_ids, e_type_mask): #返回mask其余实体的embedding
-        # import pdb
-        # pdb.set_trace()
-        labels = e_type_ids[:, :, 0][e_type_mask[:, :, 0] == 1] #直接找到实体的黄金标签,[18, 56, 56, 34, 61,  5,  5]
-        hiddens = e_out[e_type_mask[:, :, 0] == 1]  #会把所有的实体展开,batchsize * max entity中，例如是5*2，只保留有意义的，例如只有7个有意义，全0的删除
-        label_set = set(labels.detach().cpu().numpy()) #labels去重复{34, 5, 18, 56, 61}
-        for ii in label_set:
-            self.types_mask_embedding.weight.data[ii] = hiddens[labels == ii].mean(0) #label ==ii,会把所有span为ii的句向量，相加平均后放到原型
-    
-    def update_type_context_embedding(self, e_out, e_type_ids, e_type_mask): #返回mask其余实体的embedding
-        # import pdb
-        # pdb.set_trace()
-        labels = e_type_ids[:, :, 0][e_type_mask[:, :, 0] == 1] #直接找到实体的黄金标签,[18, 56, 56, 34, 61,  5,  5]
-        hiddens = e_out[e_type_mask[:, :, 0] == 1]  #会把所有的实体展开,batchsize * max entity中，例如是5*2，只保留有意义的，例如只有7个有意义，全0的删除
-        label_set = set(labels.detach().cpu().numpy()) #labels去重复{34, 5, 18, 56, 61}
-        for ii in label_set:
-            self.types_context_embedding.weight.data[ii] = hiddens[labels == ii].mean(0) #label ==ii,会把所有span为ii的句向量，相加平均后放到原型
-
-    
 
 class InputExample(object):
     def __init__(
@@ -268,8 +260,6 @@ class Corpus(object):
         self.tasks = self.read_tasks_from_file(
             data_fn, update_transition_matrix, concat_types, dataset
         ) #task里集成了support与query，这两个里面又集成了input ids,e_types_ids等等
-        # import pdb
-        # pdb.set_trace()
         self.n_total = len(self.tasks)
         self.batch_start_idx = 0
         self.batch_idxs = (
@@ -386,8 +376,6 @@ class Corpus(object):
                 tmp_query_tokens.append(token_sum)
                 if update_transition_matrix:
                     all_labels.append(labels)
-            # import pdb
-            # pdb.set_trace()
             output_tasks.append(
                 {
                     "support": tmp_support,
@@ -562,31 +550,32 @@ class Corpus(object):
         if "before" in concat_types:
             token_sum[-1] += 1 + len(tokenized_types)
 
-        for words, labels in zip(example.words, example.labels):
-            word_tokens = self.tokenizer.tokenize(words)
+        for word, label in zip(example.words, example.labels):
+            word_tokens = self.tokenizer.tokenize(word)
             token_sum.append(token_sum[-1] + len(word_tokens))
             if len(word_tokens) == 0:
                 continue
             tokens.extend(word_tokens)
             # Use the real label id for the first token of the word, and padding ids for the remaining tokens
             label_ids.extend(
-                [self.label_map[labels]]
+                [self.label_map[label]]
                 + [ignore_token_label_id] * (len(word_tokens) - 1)
             )
-        # import pdb
-        # pdb.set_trace()  
         # #这里能看到max entitys length究竟是什么
         self.max_len_dict["sentence"] = max(self.max_len_dict["sentence"], len(tokens))
         e_ids = [(token_sum[s], token_sum[e + 1] - 1) for s, e, _ in example.entities]
+        
         e_mask = np.zeros((self.max_entities_length, self.max_seq_length), np.int8)
+        for idx, (s, e) in enumerate(e_ids):
+            e_mask[idx][s : e + 1] = 1
+       
         e_type_mask = np.zeros(
             (self.max_entities_length, 1 + self.negative_types_number), np.int8
         )
         e_type_mask[: len(e_ids), :] = np.ones(
             (len(e_ids), 1 + self.negative_types_number), np.int8
         )
-        for idx, (s, e) in enumerate(e_ids):
-            e_mask[idx][s : e + 1] = 1
+        
         e_type_ids = [self.entity_types.types_map[t] for _, _, t in example.entities]  #self.entity_types.types_map 对应type的词表
         entities = [(s, e, t) for (s, e), t in zip(e_ids, e_type_ids)]
         batch_types = [self.entity_types.types_map[ii] for ii in example.types]
@@ -652,8 +641,6 @@ class Corpus(object):
                 tokens += tokenized_types
                 label_ids += [ignore_token_label_id] * len(tokenized_types)
                 segment_ids += [sequence_b_segment_id] * len(tokenized_types)
-        # import pdb
-        # pdb.set_trace()
         input_ids = self.tokenizer.convert_tokens_to_ids(tokens)
         # '''mask实体得到上下文的ids'''
         # context_tokens = []             #context的原tokens
@@ -725,8 +712,6 @@ class Corpus(object):
         for i in range(start_id, start_id + batch_size):
             idx = self.batch_idxs[i]
             task_curr = self.tasks[idx]
-            # import pdb
-            # pdb.set_trace()
             query_item = {
                 
                 "input_ids": torch.tensor(

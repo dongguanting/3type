@@ -4,3 +4,5 @@ __pycache__/
 /episode-data/
 /data/
 /ACL2020data/
+/temp.*
+git_commit_comment.txt
