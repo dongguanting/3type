@@ -53,7 +53,7 @@ for seed in ${SEEDS[@]}; do
             --top_top_dir=wzc \
             --lambda_max_loss=2.0 \
             --mask_proto \
-            --proto_cL_Loss
+            --proto_cL_Loss 
             # --instance_mask_cL_Loss
             
             # --adv_proto

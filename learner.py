@@ -324,6 +324,7 @@ class Learner(nn.Module):
         )
 
     def forward_meta(self, batch_query, batch_support, progress, inner_steps):  #常规走这个
+        # 记录初始参数，每个episode后重新加载
         names = self.get_names()
         params = self.get_params()
         weights = deepcopy(params)

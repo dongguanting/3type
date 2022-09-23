@@ -157,7 +157,7 @@ def train_meta(args):
 
         batch_query, batch_support = train_corpus.get_batch_meta(
             batch_size=args.inner_size
-        )  # (batch_size=32)
+        )
         if args.use_supervise:
             span_loss, type_loss = learner.forward_supervise(
                 batch_query,

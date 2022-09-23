@@ -114,7 +114,7 @@ class BertForTokenClassification_(BertForTokenClassification):
 
 
         sequence_output = self.dropout(output[0])
-
+        losses = []
  
 
         if self.train_mode != "type":
@@ -155,7 +155,6 @@ class BertForTokenClassification_(BertForTokenClassification):
             if is_update_type_embedding:
                 entity_types.update_type_embedding(e_out, e_type_ids, e_type_mask, type='origin') #label的原型type embedding weight更新了
             #原本的原型：保存type_embedding变量中，可以再entity_types类中设置是否更新这个embedding
-            # TODO 下面两行，检查是否合理
             e_out = e_out.unsqueeze(2).expand(B, M, K, -1) 
             types = entity_types.get_types_embedding(e_type_ids, type='origin')
             if self.distance_mode == "cat":
@@ -169,7 +168,6 @@ class BertForTokenClassification_(BertForTokenClassification):
                 e_types = sim_k * (e_out * types).sum(-1) / 768   # batch_size x max_entity_num x K, 隐层被降维了
             e_logits = e_types
             if M:
-                # TODO 检查合理性，检查是不是写错了
                 em = e_type_mask.clone()
                 em[em.sum(-1) == 0] = 1
                 e = e_types * em
@@ -177,14 +175,15 @@ class BertForTokenClassification_(BertForTokenClassification):
                 type_loss = self.calc_loss(
                     self.type_loss, e, e_type_label, e_type_mask[:, :, 0]
                 )
+                losses.append(type_loss)
             # else:
             #     type_loss = torch.tensor(0).to(sequence_output.device) #这句先注释掉，目前不走
             '''原proto的对比学习，正样本为同类别的原型，负样本为非同类别的原型(也可以改为原样本的其余实体，proto_CL_Loss中origin，aug模式分别对应两种负样本模式)'''
             if self.proto_cL_Loss:
-                e_hidden, e_labels=self.set_hidden(e_out[:, :, 0, :], e_type_ids, e_type_mask, entity_types) #因为数据中有可能同一类别出现若干条，我把它们去重，每种类别保留一条，这样符合batch内负样本均为不同类别数据
+                e_hidden, e_labels=self.get_hidden(e_out[:, :, 0, :], e_type_ids, e_type_mask, entity_types) #因为数据中有可能同一类别出现若干条，我把它们去重，每种类别保留一条，这样符合batch内负样本均为不同类别数据
                 proto_origin = self.get_proto(e_labels, entity_types, type='origin')
                 proto_cl_loss = proto_CL_Loss(e_hidden,proto_origin)
-                type_loss = 0.2 * proto_cl_loss + type_loss
+                losses.append(proto_cl_loss)
 
 
             if self.mask_proto:
@@ -219,16 +218,14 @@ class BertForTokenClassification_(BertForTokenClassification):
                     em[em.sum(-1) == 0] = 1
                     e = e_types * em
                     e_type_label = torch.zeros(*e_type_ids_masked.shape[:2]).to(e_types.device)
-                    type_loss_masked = self.calc_loss(
-                        self.type_loss, e, e_type_label, e_type_mask_masked[:, :, 0])
-                    type_loss=type_loss+0.2*type_loss_masked #直接通过mask原型计算loss，不加可以注释掉
-                
+                    type_loss_masked = self.calc_loss(self.type_loss, e, e_type_label, e_type_mask_masked[:, :, 0])
+                    losses.append(type_loss_masked)
+
                 if self.proto_cL_Loss: #加入原型对比学习
                     #这里可以尝试一下e_hidden_mask为原样本的效果
                     proto_origin = self.get_proto(e_labels, entity_types, type='mask')
                     proto_cl_loss = proto_CL_Loss(e_hidden,proto_origin)
-                    type_loss = 0.2 * proto_cl_loss + type_loss #mask原型的cl loss                    
-
+                    losses.append(proto_cl_loss)
 
             # TODO 跑通加context原型的代码
             if self.context_proto:
@@ -268,32 +265,31 @@ class BertForTokenClassification_(BertForTokenClassification):
                     type_loss_context = self.calc_loss(
                         self.type_loss, e, e_type_label, e_type_mask[:, :, 0]
                     )
-                    type_loss=type_loss+0.2*type_loss_context #如果更新原型度量直接计算的loss，则加这句，否则可以注释掉
+                    losses.append(type_loss_context)
 
                 if self.proto_cL_Loss: 
                     # e_hidden, e_labels=self.set_hidden(e_out, e_type_ids, e_type_mask, entity_types) #因为数据中有可能同一类别出现若干条，我把它们去重，每种类别保留一条，这样符合batch内负样本均为不同类别数据             
                     proto_origin = self.get_proto(e_labels, entity_types, type='context')
                     proto_cl_loss = proto_CL_Loss(e_hidden,proto_origin)
-                    type_loss = 0.2 * proto_cl_loss + type_loss #上下文原型cl loss
+                    losses.append(proto_cl_loss)
 
 
-
-            # TODO: 1. 重命名变量；2. 重命名损失变量；3. 调整代码顺序；4. 检查更新masked 和 context类原型是否正确
-            # TODO 重构loss的和；用多任务调点   
             '''2个instance-instance级别的对比学习'''
             if self.instance_mask_cL_Loss:
                 '''mask其他实体为正样本的对比学习，负样本可以为原样本的其他样例'''
-                e_hidden, e_labels=self.set_hidden(e_out, e_type_ids, e_type_mask, entity_types) #因为数据中有可能同一类别出现若干条，我把它们去重，每种类别保留一条，这样符合batch内负样本均为不同类别数据
-                e_mask_hidden, e_mask_labels=self.set_hidden(e_out_masked, e_type_ids, e_type_mask, entity_types)
+                e_hidden, e_labels=self.get_hidden(e_out, e_type_ids, e_type_mask, entity_types) #因为数据中有可能同一类别出现若干条，我把它们去重，每种类别保留一条，这样符合batch内负样本均为不同类别数据
+                e_mask_hidden, e_mask_labels=self.get_hidden(e_out_masked, e_type_ids, e_type_mask, entity_types)
                 instance_mask_cL_Loss = instance_CL_Loss(e_hidden,e_mask_hidden) #以mask其他实体为正样本的对比学习，负样本可以为原样本的其他样例，也可以正样本的其余样本
-                type_loss = 0.2 * instance_mask_cL_Loss + type_loss
+                losses.append(instance_mask_cL_Loss)
 
                 '''以上下文为正样本的对比学习，负样本可以为原样本的其他样例，也可以正样本的其余样本'''
-                e_hidden, e_labels=self.set_hidden(e_out, e_type_ids, e_type_mask, entity_types) #因为数据中有可能同一类别出现若干条，我把它们去重，每种类别保留一条，这样符合batch内负样本均为不同类别数据
-                e_context_hidden, e_context_labels=self.set_hidden(e_out_context, e_type_ids, e_type_mask, entity_types)
+                e_hidden, e_labels=self.get_hidden(e_out, e_type_ids, e_type_mask, entity_types) #因为数据中有可能同一类别出现若干条，我把它们去重，每种类别保留一条，这样符合batch内负样本均为不同类别数据
+                e_context_hidden, e_context_labels=self.get_hidden(e_out_context, e_type_ids, e_type_mask, entity_types)
                 instance_context_cL_Loss = instance_CL_Loss(e_hidden,e_context_hidden) #以上下文为正样本的对比学习，负样本可以为原样本的其他样例，也可以正样本的其余样本
-                type_loss = 0.2 * instance_context_cL_Loss + type_loss
+                losses.append(instance_context_cL_Loss)
 
+            alpha = self.calc_alpha(*losses)
+            type_loss = torch.stack(losses).matmul(alpha)
             
             
                 
@@ -373,7 +369,7 @@ class BertForTokenClassification_(BertForTokenClassification):
             return e_out.sum(2) / (e_mask.sum(-1).unsqueeze(-1) + 1e-30)  # batch_size x max_entity_num x hidden_size
     
     
-    def set_hidden(self,e_out, e_type_ids, e_type_mask,entity_types):  #对比学习时数据预处理，去除重复类别的数据，返回去重的embedding，以及对应的原型
+    def get_hidden(self,e_out, e_type_ids, e_type_mask,entity_types):  #对比学习时数据预处理，去除重复类别的数据，返回去重的embedding，以及对应的原型
         hiddens = e_out[e_type_mask[:, :, 0] == 1]
         labels = e_type_ids[:, :, 0][e_type_mask[:, :, 0] == 1]
         set_labels = []  #去重的labels
@@ -424,7 +420,61 @@ class BertForTokenClassification_(BertForTokenClassification):
             return ce_loss.sum() / (mask.sum() + 1e-10)
         return ce_loss.sum() / (target.sum() + 1e-10)
 
+    def calc_alpha(self, *losses):
+        class Gamma(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.gamma = nn.parameter.Parameter(torch.tensor(0.5))
+            
+            def forward(self, M, alpha, e_t):
+                temp = (1-self.gamma)*alpha + self.gamma*e_t
+                loss = temp.matmul(M).matmul(temp)
+                return loss
+        
+        n_loss = len(losses)
+        alpha = torch.tensor([1/n_loss] * n_loss)
+        params = [p for p in self.parameters() if p.requires_grad]
+        # 构建M矩阵
+        g = []
+        for loss in losses:
+            temp_g = torch.autograd.grad(loss, params, retain_graph=True)
+            g.append(torch.cat([i.reshape(-1) for i in temp_g]))
+        M = []
+        for i in range(n_loss):
+            for j in range(n_loss):
+                M.append(g[i].matmul(g[j]))
+        M = torch.stack(M)
+        M = M.reshape(n_loss, n_loss)
 
+        device = M.device
+        alpha = alpha.to(device)
+
+        MAX_N_ITER = 1000
+        MAX_N_STEPS = 1000
+        EPS = 1e-5
+        gamma_model = Gamma()
+        optimizer = torch.optim.AdamW(gamma_model.parameters(), lr=0.01)
+        for i in range(MAX_N_ITER):
+            t = torch.argmin(torch.sum(alpha.expand(n_loss, n_loss)*M, 1))
+            e_t = torch.zeros(n_loss).to(device)
+            e_t[t] = 1.
+            # 1维搜索
+            gamma_model.gamma.data = torch.tensor(0.5)
+            loss_rec = 0.
+            for step in range(MAX_N_STEPS):
+                loss = gamma_model(M, alpha, e_t)
+                if abs(loss.item() - loss_rec) < EPS:
+                    break
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                loss_rec = loss.item()
+            gamma = gamma_model.gamma.data.to(device).clamp(0, 0.99)
+            alpha = (1-gamma)*alpha + gamma*e_t
+            if gamma < EPS:
+                break
+
+        return alpha
 class ViterbiDecoder(object):
     def __init__(
         self,

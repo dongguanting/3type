@@ -133,7 +133,6 @@ class EntityTypes(object):
         labels = e_type_ids[:, :, 0][e_type_mask[:, :, 0] == 1] #直接找到实体的黄金标签,[18, 56, 56, 34, 61,  5,  5]
         hiddens = e_out[e_type_mask[:, :, 0] == 1]  #会把所有的实体展开,batchsize * max entity中，例如是5*2，只保留有意义的，例如只有7个有意义，全0的删除
         label_set = set(labels.detach().cpu().numpy()) #labels去重复{34, 5, 18, 56, 61}
-        # FIXME 这里只是更新成一个task内的实体表征的均值
         if type == 'origin':
             for ii in label_set:
                 self.types_embedding.weight.data[ii] = hiddens[labels == ii].mean(0) #label ==ii,会把所有span为ii的句向量，相加平均后放到原型
