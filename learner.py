@@ -344,6 +344,7 @@ class Learner(nn.Module):
         for task_id in range(task_num):
             '''正常积累梯度'''
             self.inner_update(batch_support[task_id], lr_inner, inner_steps=inner_steps) #先内部计算原型
+            # TODO 优化query集梯度累积的速度
             _, _, loss, type_loss = self.model.forward_wuqh(   #外部积累所有任务的梯度后更新,引入了type—loss-context
                 input_ids=batch_query[task_id]["input_ids"],
                 # context_ids = batch_query[task_id]["context_ids"], #上下文的ids，传入

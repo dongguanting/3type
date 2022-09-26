@@ -16,6 +16,7 @@ from modeling import ViterbiDecoder
 from preprocessor import Corpus, EntityTypes
 from utils import set_seed
 
+from tqdm import tqdm
 import pdb
 
 def get_label_list(args):
@@ -152,7 +153,7 @@ def train_meta(args):
     F1_test = -1.0
     best_step, protect_step = -1.0, 100 if args.train_mode != "type" else 50
 
-    for step in range(args.max_meta_steps):
+    for step in tqdm(range(args.max_meta_steps)):
         progress = 1.0 * step / args.max_meta_steps
 
         batch_query, batch_support = train_corpus.get_batch_meta(

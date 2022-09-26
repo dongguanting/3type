@@ -13,6 +13,7 @@ from transformers import BertForTokenClassification
 from contrastive import instance_CL_Loss, proto_CL_Loss
 
 import pdb
+import time
 logger = logging.getLogger(__file__)
 
 
@@ -421,16 +422,41 @@ class BertForTokenClassification_(BertForTokenClassification):
         return ce_loss.sum() / (target.sum() + 1e-10)
 
     def calc_alpha(self, *losses):
+        
         class Gamma(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.gamma = nn.parameter.Parameter(torch.tensor(0.5))
+                self.gamma = nn.parameter.Parameter(torch.linspace(0, 1, 100).unsqueeze(-1))
             
             def forward(self, M, alpha, e_t):
-                temp = (1-self.gamma)*alpha + self.gamma*e_t
-                loss = temp.matmul(M).matmul(temp)
+                temp = (1-self.gamma)*alpha.expand(100, -1) + self.gamma*e_t.expand(100, -1)
+                loss = temp.matmul(M).matmul(temp.T).diag().sum()
                 return loss
+
+            def set_gamma(self, start, end, device):
+                self.gamma.data = torch.linspace(start, end, 100).unsqueeze(-1).to(device)
         
+        def search_1d(self, M, alpha, e_t, gamma_model):
+            loss_rec = 0.
+            start = 0
+            end = 1
+            for i in range(4):
+                gamma_model.set_gamma(start, end, M.device)
+                loss = gamma_model(M, alpha, e_t)
+                if abs(loss.item() - loss_rec) < EPS:
+                    break
+                optimizer.zero_grad()
+                loss.backward()
+                loss_rec = loss.item()
+                gamma = gamma_model.gamma.data
+                grad = gamma_model.gamma.grad
+                if grad[0] * grad[-1] > 0:
+                    return gamma[torch.argmin(abs(grad))].clamp(0, 0.9999)
+                end = gamma[grad>0].min()
+                start = gamma[grad<0].max()
+            gamma = gamma_model.gamma.data.mean()
+            return gamma
+
         n_loss = len(losses)
         alpha = torch.tensor([1/n_loss] * n_loss)
         params = [p for p in self.parameters() if p.requires_grad]
@@ -449,29 +475,17 @@ class BertForTokenClassification_(BertForTokenClassification):
         device = M.device
         alpha = alpha.to(device)
 
-        MAX_N_ITER = 1000
-        MAX_N_STEPS = 1000
+        MAX_N_ITER = 100
         EPS = 1e-5
-        gamma_model = Gamma()
+        gamma_model = Gamma().to(device)
         optimizer = torch.optim.AdamW(gamma_model.parameters(), lr=0.01)
         for i in range(MAX_N_ITER):
             t = torch.argmin(torch.sum(alpha.expand(n_loss, n_loss)*M, 1))
             e_t = torch.zeros(n_loss).to(device)
             e_t[t] = 1.
-            # 1维搜索
-            gamma_model.gamma.data = torch.tensor(0.5)
-            loss_rec = 0.
-            for step in range(MAX_N_STEPS):
-                loss = gamma_model(M, alpha, e_t)
-                if abs(loss.item() - loss_rec) < EPS:
-                    break
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-                loss_rec = loss.item()
-            gamma = gamma_model.gamma.data.to(device).clamp(0, 0.99)
+            gamma = search_1d(self, M, alpha, e_t, gamma_model)
             alpha = (1-gamma)*alpha + gamma*e_t
-            if gamma < EPS:
+            if gamma < EPS or abs(1-alpha.max()) < EPS:
                 break
 
         return alpha
