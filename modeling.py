@@ -450,10 +450,13 @@ class BertForTokenClassification_(BertForTokenClassification):
                 loss_rec = loss.item()
                 gamma = gamma_model.gamma.data
                 grad = gamma_model.gamma.grad
-                if grad[0] * grad[-1] > 0:
+                if grad[0] * grad[-1] >= 0:
                     return gamma[torch.argmin(abs(grad))].clamp(0, 0.9999)
-                end = gamma[grad>0].min()
-                start = gamma[grad<0].max()
+                try:
+                    end = gamma[grad>0].min()
+                    start = gamma[grad<0].max()
+                except:
+                    pdb.set_trace()
             gamma = gamma_model.gamma.data.mean()
             return gamma
 
@@ -476,7 +479,7 @@ class BertForTokenClassification_(BertForTokenClassification):
         alpha = alpha.to(device)
 
         MAX_N_ITER = 100
-        EPS = 1e-5
+        EPS = 1e-3
         gamma_model = Gamma().to(device)
         optimizer = torch.optim.AdamW(gamma_model.parameters(), lr=0.01)
         for i in range(MAX_N_ITER):

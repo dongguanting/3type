@@ -506,19 +506,19 @@ class Learner(nn.Module):
 
             # eval on pseudo query examples (test example)
             self.model.eval()
+            logits, e_ls, tmp_eval_loss, _ = self.batch_test(
+                {
+                    "input_ids": eval_query[0]["input_ids"],
+                    "attention_mask": eval_query[0]["input_mask"],
+                    "token_type_ids": eval_query[0]["segment_ids"],
+                    "labels": eval_query[0]["label_ids"],
+                    "e_mask": eval_query[0]["e_mask"],
+                    "e_type_ids": eval_query[0]["e_type_ids"],
+                    "e_type_mask": eval_query[0]["e_type_mask"],
+                    "entity_types": self.entity_types,
+                }
+            )
             with torch.no_grad():
-                logits, e_ls, tmp_eval_loss, _ = self.batch_test(
-                    {
-                        "input_ids": eval_query[0]["input_ids"],
-                        "attention_mask": eval_query[0]["input_mask"],
-                        "token_type_ids": eval_query[0]["segment_ids"],
-                        "labels": eval_query[0]["label_ids"],
-                        "e_mask": eval_query[0]["e_mask"],
-                        "e_type_ids": eval_query[0]["e_type_ids"],
-                        "e_type_mask": eval_query[0]["e_type_mask"],
-                        "entity_types": self.entity_types,
-                    }
-                )
                 lss.append(logits)
                 if self.model.train_mode != "type":
                     eval_loss += tmp_eval_loss
