@@ -74,6 +74,7 @@ def replace_type_embedding(learner, args):
 
 
 def train_meta(args, trial = None):
+    logger = args.logger
     logger.info("********** Scheme: Meta Learning **********")
     label_list = get_label_list(args)
     
@@ -637,7 +638,7 @@ def objective(tral):
     # setup logger settings
     if args.test_only:   ##测试集模型调用
         top_dir = "models-{}-{}-{}-{}".format(args.N, args.K, args.mode, args.top_top_dir)
-        args.model_dir = f"{args.lr_inner}-{args.lr_meta}-{args.inner_steps}-{args.inner_size}-{args.cl_temp}"
+        args.model_dir = f"{args.lr_inner:.3e}-{args.lr_meta:.3e}-{args.inner_steps}-{args.inner_size}-{args.cl_temp:.3f}"
         args.model_dir = os.path.join(top_dir, args.model_dir)
         if not os.path.exists(args.model_dir):
             if args.convert_bpe:
@@ -652,7 +653,7 @@ def objective(tral):
 
     else:
         top_dir = "models-{}-{}-{}-{}".format(args.N, args.K, args.mode,args.top_top_dir)
-        args.result_dir = f"{args.lr_inner}-{args.lr_meta}-{args.inner_steps}-{args.inner_size}-{args.cl_temp}"
+        args.result_dir = f"{args.lr_inner:.3e}-{args.lr_meta:.3e}-{args.inner_steps}-{args.inner_size}-{args.cl_temp:.3f}"
         os.makedirs(top_dir, exist_ok=True)
         if not os.path.exists("{}/{}".format(top_dir, args.result_dir)):
             os.mkdir("{}/{}".format(top_dir, args.result_dir))
@@ -686,6 +687,7 @@ def objective(tral):
 
     args.device = device
     logger.info(f"Using Device {device}")
+    args.logger = logger
     args.entity_types = EntityTypes(
         args.types_path, args.negative_types_number, args.negative_mode, args.context_proto, args.mask_proto
     )
