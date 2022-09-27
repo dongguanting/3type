@@ -18,6 +18,7 @@ from utils import set_seed
 
 from tqdm import tqdm
 import pdb
+import optuna
 
 def get_label_list(args):
     # prepare dataset
@@ -72,7 +73,7 @@ def replace_type_embedding(learner, args):
         ] = entity_types.types_embedding.weight.data[ii]
 
 
-def train_meta(args):
+def train_meta(args, trial = None):
     logger.info("********** Scheme: Meta Learning **********")
     label_list = get_label_list(args)
     
@@ -226,6 +227,15 @@ def train_meta(args):
                     "Best Valid F1: {}, Step: {}".format(F1_valid_best, best_step)
                 )
                 logger.info("Test F1: {}".format(F1_test))
+                
+            if trial is not None:
+                if args.train_mode == 'type':
+                    trial.report(result_valid["type_f1"], step // args.eval_every_meta_steps)
+                elif args.train_mode == 'span':
+                    trial.report(result_valid["span_f1"], step // args.eval_every_meta_steps)
+                
+                if trial.should_prune():
+                    raise optuna.exceptions.TrialPruned()
             
             if not is_best:
                 bad_times += 1
@@ -234,6 +244,8 @@ def train_meta(args):
                     break
             else:
                 bad_times = 0
+
+    return F1_valid_best
 
 
 def test(args, learner, corpus, types: str):
@@ -388,7 +400,7 @@ def convert_bpe(args):
     convert_base("test")
 
 
-def main():
+def objective(tral):
 
     def my_bool(s):
         return s != "False"
@@ -586,8 +598,31 @@ def main():
     parser.add_argument(
         "--top_top_dir", type=str, help="路径设置models-5-1-inter-[top_top_dir]，以便于区分各个调参,添加", default=""
     )
+    parser.add_argument('--cl_temp', type=float, help="对比学习温度系数", default=0.5)
 
     args = parser.parse_args()
+
+    args.seed = 3407
+    args.gpu_device = 0
+    args.mode = 'inter'
+    args.N = 5
+    args.K = 1
+    args.eval_every_meta_steps = 50
+    args.train_mode = 'type'
+    args.concat_types = "None"
+    args.top_top_dir = 'wzc'
+    args.mask_proto = True
+    args.proto_cL_Loss = True
+
+    args.lr_inner = tral.suggest_float("lr_inner", 1e-5, 5e-4, log=True)
+    args.lr_meta = tral.suggest_float("lr_meta", 1e-5, 5e-4, log=True)
+    args.inner_steps = tral.suggest_int("inner_steps", 1, 5)
+    args.inner_size = tral.suggest_int("inner_size", 1, 8)
+    args.cl_temp = tral.suggest_float("cl_temp", 0.1, 0.8, log=True)
+
+
+
+
     args.negative_types_number = args.N - 1
     if "Domain" in args.dataset:
         args.types_path = "data/entity_types_domain.json"
@@ -602,16 +637,7 @@ def main():
     # setup logger settings
     if args.test_only:   ##测试集模型调用
         top_dir = "models-{}-{}-{}-{}".format(args.N, args.K, args.mode, args.top_top_dir)
-        args.model_dir = "{}-innerSteps_{}-innerSize_{}-lrInner_{}-lrMeta_{}-maxSteps_{}-seed_{}{}".format(
-            args.bert_model,
-            args.inner_steps,
-            args.inner_size,
-            args.lr_inner,
-            args.lr_meta,
-            args.max_meta_steps,
-            args.seed,
-            "-name_{}".format(args.name) if args.name else "",
-        )
+        args.model_dir = f"{args.lr_inner}-{args.lr_meta}-{args.inner_steps}-{args.inner_size}-{args.cl_temp}"
         args.model_dir = os.path.join(top_dir, args.model_dir)
         if not os.path.exists(args.model_dir):
             if args.convert_bpe:
@@ -626,16 +652,7 @@ def main():
 
     else:
         top_dir = "models-{}-{}-{}-{}".format(args.N, args.K, args.mode,args.top_top_dir)
-        args.result_dir = "{}-innerSteps_{}-innerSize_{}-lrInner_{}-lrMeta_{}-maxSteps_{}-seed_{}{}".format(
-            args.bert_model,
-            args.inner_steps,
-            args.inner_size,
-            args.lr_inner,
-            args.lr_meta,
-            args.max_meta_steps,
-            args.seed,
-            "-name_{}".format(args.name) if args.name else "",
-        )
+        args.result_dir = f"{args.lr_inner}-{args.lr_meta}-{args.inner_steps}-{args.inner_size}-{args.cl_temp}"
         os.makedirs(top_dir, exist_ok=True)
         if not os.path.exists("{}/{}".format(top_dir, args.result_dir)):
             os.mkdir("{}/{}".format(top_dir, args.result_dir))
@@ -689,8 +706,29 @@ def main():
     else:
         if args.model_dir != "":
             raise ValueError("Model directory should be NULL!")
-        train_meta(args)
+        f1_valid_best = train_meta(args)
+        return f1_valid_best[args.train_mode]
+
+
 
 
 if __name__ == "__main__":
-    main()
+    study = optuna.create_study(direction="maximize")
+    study.optimize(objective, n_trials=50)
+
+    pruned_trials = study.get_trials(deepcopy=False, states=[TrialState.PRUNED])
+    complete_trials = study.get_trials(deepcopy=False, states=[TrialState.COMPLETE])
+
+    print("Study statistics: ")
+    print("  Number of finished trials: ", len(study.trials))
+    print("  Number of pruned trials: ", len(pruned_trials))
+    print("  Number of complete trials: ", len(complete_trials))
+
+    print("Best trial:")
+    trial = study.best_trial
+
+    print("  Value: ", trial.value)
+
+    print("  Params: ")
+    for key, value in trial.params.items():
+        print("    {}: {}".format(key, value))

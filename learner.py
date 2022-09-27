@@ -116,6 +116,7 @@ class Learner(nn.Module):
                 args.instance_mask_cL_Loss,
                 args.instance_context_cL_Loss,
                 args.proto_cL_Loss,
+                args.cl_temp
             )
             
             self.model.to(args.device)

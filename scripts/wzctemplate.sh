@@ -43,7 +43,7 @@ for seed in ${SEEDS[@]}; do
             --K=${K} \
             --similar_k=10 \
             --inner_similar_k=10 \
-            --eval_every_meta_steps=500 \
+            --eval_every_meta_steps=50 \
             --name=10-k_100_type_2_4_3_10_10 \
             --train_mode=type \
             --inner_steps=2 \

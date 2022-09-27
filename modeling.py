@@ -38,6 +38,7 @@ class BertForTokenClassification_(BertForTokenClassification):
         instance_mask_cL_Loss: bool = False, #自己加的变量
         instance_context_cL_Loss: bool = False, #自己加的变量
         proto_cL_Loss: bool = False, #自己加的变量
+        cl_temp: float = 0.5
     ):
         self.use_classify = use_classify
         self.distance_mode = distance_mode
@@ -49,6 +50,7 @@ class BertForTokenClassification_(BertForTokenClassification):
         self.instance_mask_cL_Loss = instance_mask_cL_Loss
         self.instance_context_cL_Loss = instance_context_cL_Loss
         self.proto_cL_Loss = proto_cL_Loss
+        self.cl_temp = cl_temp
 
 
         if train_mode == "type":
@@ -80,6 +82,7 @@ class BertForTokenClassification_(BertForTokenClassification):
             "instance_mask_cL_Loss":instance_mask_cL_Loss,
             "instance_context_cL_Loss":instance_context_cL_Loss,
             "proto_cL_Loss":proto_cL_Loss,
+            "cl_temp": cl_temp
 
         }
         logger.info(f"Model Setting: {config}")
@@ -183,7 +186,7 @@ class BertForTokenClassification_(BertForTokenClassification):
             if self.proto_cL_Loss:
                 e_hidden, e_labels=self.get_hidden(e_out[:, :, 0, :], e_type_ids, e_type_mask, entity_types) #因为数据中有可能同一类别出现若干条，我把它们去重，每种类别保留一条，这样符合batch内负样本均为不同类别数据
                 proto_origin = self.get_proto(e_labels, entity_types, type='origin')
-                proto_cl_loss = proto_CL_Loss(e_hidden,proto_origin)
+                proto_cl_loss = proto_CL_Loss(e_hidden, proto_origin, temp=self.cl_temp)
                 losses.append(proto_cl_loss)
 
 
@@ -225,7 +228,7 @@ class BertForTokenClassification_(BertForTokenClassification):
                 if self.proto_cL_Loss: #加入原型对比学习
                     #这里可以尝试一下e_hidden_mask为原样本的效果
                     proto_origin = self.get_proto(e_labels, entity_types, type='mask')
-                    proto_cl_loss = proto_CL_Loss(e_hidden,proto_origin)
+                    proto_cl_loss = proto_CL_Loss(e_hidden, proto_origin, temp=self.cl_temp)
                     losses.append(proto_cl_loss)
 
             # TODO 跑通加context原型的代码
@@ -271,7 +274,7 @@ class BertForTokenClassification_(BertForTokenClassification):
                 if self.proto_cL_Loss: 
                     # e_hidden, e_labels=self.set_hidden(e_out, e_type_ids, e_type_mask, entity_types) #因为数据中有可能同一类别出现若干条，我把它们去重，每种类别保留一条，这样符合batch内负样本均为不同类别数据             
                     proto_origin = self.get_proto(e_labels, entity_types, type='context')
-                    proto_cl_loss = proto_CL_Loss(e_hidden,proto_origin)
+                    proto_cl_loss = proto_CL_Loss(e_hidden, proto_origin, temp=self.cl_temp)
                     losses.append(proto_cl_loss)
 
 
@@ -280,13 +283,13 @@ class BertForTokenClassification_(BertForTokenClassification):
                 '''mask其他实体为正样本的对比学习，负样本可以为原样本的其他样例'''
                 e_hidden, e_labels=self.get_hidden(e_out, e_type_ids, e_type_mask, entity_types) #因为数据中有可能同一类别出现若干条，我把它们去重，每种类别保留一条，这样符合batch内负样本均为不同类别数据
                 e_mask_hidden, e_mask_labels=self.get_hidden(e_out_masked, e_type_ids, e_type_mask, entity_types)
-                instance_mask_cL_Loss = instance_CL_Loss(e_hidden,e_mask_hidden) #以mask其他实体为正样本的对比学习，负样本可以为原样本的其他样例，也可以正样本的其余样本
+                instance_mask_cL_Loss = instance_CL_Loss(e_hidden, e_mask_hidden, temp=self.cl_temp) #以mask其他实体为正样本的对比学习，负样本可以为原样本的其他样例，也可以正样本的其余样本
                 losses.append(instance_mask_cL_Loss)
 
                 '''以上下文为正样本的对比学习，负样本可以为原样本的其他样例，也可以正样本的其余样本'''
                 e_hidden, e_labels=self.get_hidden(e_out, e_type_ids, e_type_mask, entity_types) #因为数据中有可能同一类别出现若干条，我把它们去重，每种类别保留一条，这样符合batch内负样本均为不同类别数据
                 e_context_hidden, e_context_labels=self.get_hidden(e_out_context, e_type_ids, e_type_mask, entity_types)
-                instance_context_cL_Loss = instance_CL_Loss(e_hidden,e_context_hidden) #以上下文为正样本的对比学习，负样本可以为原样本的其他样例，也可以正样本的其余样本
+                instance_context_cL_Loss = instance_CL_Loss(e_hidden, e_context_hidden, temp=self.cl_temp) #以上下文为正样本的对比学习，负样本可以为原样本的其他样例，也可以正样本的其余样本
                 losses.append(instance_context_cL_Loss)
 
             alpha = self.calc_alpha(*losses)
