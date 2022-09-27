@@ -250,6 +250,7 @@ def train_meta(args, trial = None):
 
 
 def test(args, learner, corpus, types: str):
+    logger = args.logger
     if corpus.viterbi != "none":
         id2label = corpus.id2label
         transition_matrix = corpus.transition_matrix
@@ -291,6 +292,7 @@ def test(args, learner, corpus, types: str):
 
 
 def evaluate(args):
+    logger = args.logger
     logger.info("********** Scheme: Meta Test **********")
     label_list = get_label_list(args)
 
