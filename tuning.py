@@ -246,6 +246,13 @@ def train_meta(args, trial = None):
             else:
                 bad_times = 0
 
+    logger.info("********** Scheme: evaluate - [test] **********")
+    learner.model_dir = args.result_dir
+    learner.load_model(args.train_mode if args.train_mode in ['span', 'type'] else 'all')
+    result_test, predictions_test = test(args, learner, test_corpus, "test")
+
+    logger.info(f"TEST RESULT: f1:{result_test['f1']}, span_f1: {result_test['span_f1']}, type_f1: {result_test['type_f1']}")
+
     return F1_valid_best
 
 
@@ -616,6 +623,7 @@ def objective(tral):
     args.top_top_dir = 'wzc'
     args.mask_proto = True
     args.proto_cL_Loss = True
+    args.ignore_eval_test = True
 
     args.lr_inner = tral.suggest_float("lr_inner", 1e-5, 5e-4, log=True)
     args.lr_meta = tral.suggest_float("lr_meta", 1e-5, 5e-4, log=True)
@@ -719,6 +727,8 @@ def objective(tral):
 if __name__ == "__main__":
     study = optuna.create_study(direction="maximize")
     study.optimize(objective, n_trials=50)
+    # n_trials: 实验次数，n_jobs: 并发任务数量，-1时为CPU数量
+    # study.optimize(objective, n_trials=50, n_jobs=-1)
 
     pruned_trials = study.get_trials(deepcopy=False, states=[TrialState.PRUNED])
     complete_trials = study.get_trials(deepcopy=False, states=[TrialState.COMPLETE])

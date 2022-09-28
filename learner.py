@@ -747,6 +747,7 @@ class Learner(nn.Module):
             self.args.instance_mask_cL_Loss,
             self.args.instance_context_cL_Loss,
             self.args.proto_cL_Loss,
+            self.args.cl_temp
         )
         self.model.to(self.args.device)
         self.model.load_state_dict(torch.load(output_model_file, map_location="cuda"))
